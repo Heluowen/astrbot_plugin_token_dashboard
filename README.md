@@ -20,10 +20,16 @@
 
 ```bash
 cd <AstrBot 数据目录>/plugins
-git clone https://github.com/<your-name>/astrbot_plugin_token_dashboard.git
+git clone https://github.com/Heluowen/astrbot_plugin_token_dashboard.git
 ```
 
-也可以在 AstrBot WebUI 的插件页用「从 URL 安装」。
+也可以在 AstrBot WebUI 的插件页用「从 URL 安装」：
+
+```
+https://github.com/Heluowen/astrbot_plugin_token_dashboard
+```
+
+> 目录名必须是 `astrbot_plugin_token_dashboard`，和仓库名一致，否则插件无法正确加载。
 
 ## 使用
 
