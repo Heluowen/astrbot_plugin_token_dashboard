@@ -1,0 +1,68 @@
+{
+    "db_path": {
+        "description": "AstrBot 数据库路径",
+        "type": "string",
+        "hint": "留空自动探测 ~/.astrbot/data/data_v4.db。只有把数据库挪了位置才需要填。",
+        "default": ""
+    },
+    "price_input_miss_peak": {
+        "description": "高峰时段 · 输入（缓存未命中）单价，元/百万 token",
+        "type": "float",
+        "hint": "DeepSeek 现价：高峰 2 元/百万。",
+        "default": 2.0
+    },
+    "price_input_hit_peak": {
+        "description": "高峰时段 · 输入（缓存命中）单价，元/百万 token",
+        "type": "float",
+        "hint": "DeepSeek 现价：高峰 0.04 元/百万。",
+        "default": 0.04
+    },
+    "price_output_peak": {
+        "description": "高峰时段 · 输出单价，元/百万 token",
+        "type": "float",
+        "hint": "DeepSeek 现价：高峰 8 元/百万。",
+        "default": 8.0
+    },
+    "price_input_miss_offpeak": {
+        "description": "空闲时段 · 输入（缓存未命中）单价，元/百万 token",
+        "type": "float",
+        "hint": "DeepSeek 现价：空闲 1 元/百万。",
+        "default": 1.0
+    },
+    "price_input_hit_offpeak": {
+        "description": "空闲时段 · 输入（缓存命中）单价，元/百万 token",
+        "type": "float",
+        "hint": "DeepSeek 现价：空闲 0.02 元/百万。",
+        "default": 0.02
+    },
+    "price_output_offpeak": {
+        "description": "空闲时段 · 输出单价，元/百万 token",
+        "type": "float",
+        "hint": "DeepSeek 现价：空闲 4 元/百万。",
+        "default": 4.0
+    },
+    "peak_windows": {
+        "description": "高峰时段窗口（北京时间，逗号分隔）",
+        "type": "string",
+        "hint": "默认 09:00-12:00,14:00-18:00。仅工作日生效；周末与法定节假日全天为空闲时段。",
+        "default": "09:00-12:00,14:00-18:00"
+    },
+    "holidays": {
+        "description": "法定节假日日期（JSON 数组，填当年国务院公布的日子）",
+        "type": "text",
+        "hint": "支持单日与区间，例如 [\"2026-10-01\",\"2026-10-02\",\"2026-02-16..2026-02-22\"]。留空表示不排除任何节假日，工作日的 9-12/14-18 都按高峰计费。",
+        "default": ""
+    },
+    "session_labels": {
+        "description": "会话 ID 到名称的映射（可选）",
+        "type": "text",
+        "hint": "JSON 对象，例如 {\"2132379270\": \"潮汕牛肉火锅\"}。留空则显示会话 ID。",
+        "default": ""
+    },
+    "refresh_seconds": {
+        "description": "看板自动刷新间隔（秒）",
+        "type": "int",
+        "hint": "页面每隔多久重新拉一次数据。0 表示不自动刷新。默认 60。",
+        "default": 60
+    }
+}

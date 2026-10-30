@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Token 用量看板</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d212a; --line:#2a303c;
+    --txt:#e6eaf2; --dim:#8b95a7; --accent:#4f9dff; --hit:#2fbf71; --miss:#e2574c;
+    --warn:#e2b93b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+       font:14px/1.5 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;padding:18px}
+  h1{font-size:18px;margin:0 0 4px}
+  .meta{color:var(--dim);font-size:12px;margin-bottom:14px}
+  .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+  button{background:var(--panel2);color:var(--txt);border:1px solid var(--line);
+         border-radius:8px;padding:6px 14px;cursor:pointer;font-size:13px}
+  button.on{background:var(--accent);border-color:var(--accent);color:#08111f;font-weight:600}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .card .k{color:var(--dim);font-size:12px;margin-bottom:6px}
+  .card .v{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums}
+  .card .s{color:var(--dim);font-size:12px;margin-top:4px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+         padding:14px;margin-bottom:16px}
+  .panel h2{font-size:14px;margin:0 0 10px;color:var(--dim);font-weight:600}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:6px 8px;text-align:right;border-bottom:1px solid var(--line);
+        font-variant-numeric:tabular-nums;white-space:nowrap}
+  th:first-child,td:first-child{text-align:left}
+  th{color:var(--dim);font-weight:500;font-size:12px}
+  tr:hover td{background:var(--panel2)}
+  .hit{color:var(--hit)} .miss{color:var(--miss)} .dim{color:var(--dim)}
+  .warn{color:var(--warn)}
+  svg{display:block;width:100%;height:auto}
+  .legend{display:flex;gap:16px;font-size:12px;color:var(--dim);margin-top:8px}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px}
+  .empty{color:var(--dim);padding:16px 0;text-align:center}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media (max-width:900px){.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+  <h1>Token 用量看板</h1>
+  <div class="meta" id="meta">加载中…</div>
+
+  <div class="bar">
+    <button data-h="24" class="on">近 24 小时</button>
+    <button data-h="168">近 7 天</button>
+    <button data-h="720">近 30 天</button>
+    <span class="dim" style="margin-left:auto;font-size:12px" id="updated"></span>
+  </div>
+
+  <div class="cards" id="cards"></div>
+
+  <div class="panel">
+    <h2>每时段输入 token（命中 / 未命中）</h2>
+    <div id="chart-bars"></div>
+    <div class="legend">
+      <span><i style="background:var(--hit)"></i>命中缓存</span>
+      <span><i style="background:var(--miss)"></i>未命中</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>缓存命中率趋势</h2>
+    <div id="chart-rate"></div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel">
+      <h2>按会话（当前时间窗）</h2>
+      <div id="sessions"></div>
+    </div>
+    <div class="panel">
+      <h2>最近请求</h2>
+      <div id="recent"></div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  const PLUGIN = "astrbot_plugin_token_dashboard";
+  let hours = 24;
+  let timer = null;
+  let refreshSec = 60;
+
+  // ---- 接口调用：优先走 WebUI 注入的 bridge，独立打开时回退到 /api/plug ----
+  async function apiGet(path, params) {
+    const bridge = window.AstrBotPluginView || window.AstrBotPluginPage;
+    if (bridge && typeof bridge.apiGet === "function") {
+      if (typeof bridge.ready === "function") { try { await bridge.ready(); } catch (e) {} }
+      return await bridge.apiGet(path, params || {});
+    }
+    const url = new URL(`/api/plug/${PLUGIN}/${path}`, window.location.origin);
+    Object.entries(params || {}).forEach(([k, v]) => { if (v != null) url.searchParams.set(k, v); });
+    const res = await fetch(url, { credentials: "include" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return await res.json();
+  }
+
+  function fmt(n) {
+    n = Number(n) || 0;
+    if (Math.abs(n) >= 1e8) return (n / 1e8).toFixed(2) + "亿";
+    if (Math.abs(n) >= 1e4) return (n / 1e4).toFixed(1) + "万";
+    return String(n);
+  }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    })[c]);
+  }
+  function rateClass(r) { return r >= 80 ? "hit" : r >= 50 ? "warn" : "miss"; }
+
+  // ---- 卡片 ----
+  function renderCards(s) {
+    const w = s.window || {};
+    const t = s.today || {};
+    const d7 = s.last7d || {};
+    document.getElementById("cards").innerHTML = `
+      <div class="card"><div class="k">窗口请求数</div><div class="v">${fmt(w.requests)}</div>
+        <div class="s">今日 ${fmt(t.requests)} 次</div></div>
+      <div class="card"><div class="k">输入 token</div><div class="v">${fmt(w.input_total)}</div>
+        <div class="s">命中 ${fmt(w.input_hit)} · 未命中 ${fmt(w.input_miss)}</div></div>
+      <div class="card"><div class="k">缓存命中率</div>
+        <div class="v ${rateClass(w.hit_rate)}">${w.hit_rate}%</div>
+        <div class="s">今日 ${t.hit_rate}% · 7天 ${d7.hit_rate}%</div></div>
+      <div class="card"><div class="k">输出 token</div><div class="v">${fmt(w.output)}</div>
+        <div class="s">今日 ${fmt(t.output)}</div></div>
+      <div class="card"><div class="k">估算花费</div><div class="v">¥${(w.cost || 0).toFixed(3)}</div>
+        <div class="s">今日 ¥${(t.cost || 0).toFixed(3)} · 7天 ¥${(d7.cost || 0).toFixed(2)}</div></div>`;
+  }
+
+  // ---- 堆叠柱状图 ----
+  function renderBars(series) {
+    const pts = series.points || [];
+    const box = document.getElementById("chart-bars");
+    if (!pts.length) { box.innerHTML = '<div class="empty">该时间窗没有请求</div>'; return; }
+    const W = 900, H = 220, padL = 8, padR = 8, padT = 10, padB = 26;
+    const maxTot = Math.max(...pts.map(p => p.hit + p.miss), 1);
+    const bw = (W - padL - padR) / pts.length;
+    const barW = Math.max(2, Math.min(28, bw * 0.7));
+    let bars = "";
+    pts.forEach((p, i) => {
+      const tot = p.hit + p.miss;
+      const hAll = (H - padT - padB) * (tot / maxTot);
+      const hHit = hAll * (p.hit / (tot || 1));
+      const x = padL + i * bw + (bw - barW) / 2;
+      const yAll = H - padB - hAll;
+      bars += `<rect x="${x.toFixed(1)}" y="${(yAll + hHit).toFixed(1)}" width="${barW.toFixed(1)}"
+                height="${Math.max(0, hAll - hHit).toFixed(1)}" fill="#e2574c" opacity="0.85" rx="1.5"/>`;
+      bars += `<rect x="${x.toFixed(1)}" y="${yAll.toFixed(1)}" width="${barW.toFixed(1)}"
+                height="${Math.max(0, hHit).toFixed(1)}" fill="#2fbf71" opacity="0.9" rx="1.5"/>`;
+    });
+    const step = Math.max(1, Math.ceil(pts.length / 12));
+    let labels = "";
+    pts.forEach((p, i) => {
+      if (i % step) return;
+      const x = padL + i * bw + bw / 2;
+      labels += `<text x="${x.toFixed(1)}" y="${H - 8}" fill="#8b95a7" font-size="11"
+                 text-anchor="middle">${esc(p.label)}</text>`;
+    });
+    box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      <line x1="0" y1="${H - padB}" x2="${W}" y2="${H - padB}" stroke="#2a303c"/>${bars}${labels}</svg>`;
+  }
+
+  // ---- 命中率折线 ----
+  function renderRate(series) {
+    const pts = series.points || [];
+    const box = document.getElementById("chart-rate");
+    if (!pts.length) { box.innerHTML = '<div class="empty">该时间窗没有请求</div>'; return; }
+    const W = 900, H = 200, padL = 8, padR = 8, padT = 12, padB = 26;
+    const innerW = W - padL - padR, innerH = H - padT - padB;
+    const x = i => padL + (pts.length === 1 ? innerW / 2 : (i / (pts.length - 1)) * innerW);
+    const y = v => padT + innerH * (1 - Math.max(0, Math.min(100, v)) / 100);
+
+    let path = "";
+    pts.forEach((p, i) => { path += (i ? " L" : "M") + x(i).toFixed(1) + " " + y(p.hit_rate).toFixed(1); });
+    let dots = "";
+    pts.forEach((p, i) => {
+      const r = p.requests >= 3 ? 3 : 2;
+      dots += `<circle cx="${x(i).toFixed(1)}" cy="${y(p.hit_rate).toFixed(1)}" r="${r}" fill="#4f9dff"/>`;
+    });
+    const grid = [0, 50, 100].map(v =>
+      `<line x1="${padL}" y1="${y(v).toFixed(1)}" x2="${W - padR}" y2="${y(v).toFixed(1)}"
+             stroke="#2a303c" stroke-dasharray="3 4"/>
+       <text x="${padL + 2}" y="${(y(v) - 4).toFixed(1)}" fill="#8b95a7" font-size="10">${v}%</text>`
+    ).join("");
+    const step = Math.max(1, Math.ceil(pts.length / 12));
+    let labels = "";
+    pts.forEach((p, i) => {
+      if (i % step) return;
+      labels += `<text x="${x(i).toFixed(1)}" y="${H - 8}" fill="#8b95a7" font-size="11"
+                 text-anchor="middle">${esc(p.label)}</text>`;
+    });
+    box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      ${grid}<path d="${path}" fill="none" stroke="#4f9dff" stroke-width="2"/>${dots}${labels}</svg>`;
+  }
+
+  // ---- 表格 ----
+  function renderSessions(s) {
+    const items = s.items || [];
+    const box = document.getElementById("sessions");
+    if (!items.length) { box.innerHTML = '<div class="empty">暂无数据</div>'; return; }
+    let rows = items.map(i => `<tr>
+        <td>${esc(i.session)}</td>
+        <td>${fmt(i.requests)}</td>
+        <td>${fmt(i.input_total)}</td>
+        <td class="${rateClass(i.hit_rate)}">${i.hit_rate}%</td>
+        <td>¥${(i.cost || 0).toFixed(2)}</td></tr>`).join("");
+    box.innerHTML = `<table><thead><tr><th>会话</th><th>请求</th><th>输入</th>
+      <th>命中率</th><th>花费</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+
+  function renderRecent(r) {
+    const items = r.items || [];
+    const box = document.getElementById("recent");
+    if (!items.length) { box.innerHTML = '<div class="empty">暂无数据</div>'; return; }
+    let rows = items.slice(0, 30).map(i => `<tr>
+        <td>${esc(i.time)}</td>
+        <td>${fmt(i.hit)} / <span class="miss">${fmt(i.miss)}</span></td>
+        <td class="${rateClass(i.hit_rate)}">${i.hit_rate}%</td>
+        <td>${fmt(i.out)}</td>
+        <td class="${i.peak ? "miss" : "dim"}">${i.peak ? "峰" : "闲"}</td>
+        <td>¥${(i.cost || 0).toFixed(4)}</td></tr>`).join("");
+    box.innerHTML = `<table><thead><tr><th>时间</th><th>命中 / 未命中</th>
+      <th>命中率</th><th>输出</th><th>时段</th><th>花费</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+
+  // ---- 加载 ----
+  async function load() {
+    const btns = document.querySelectorAll(".bar button");
+    btns.forEach(b => b.classList.toggle("on", Number(b.dataset.h) === hours));
+    try {
+      const [summary, series, sessions, recent, meta] = await Promise.all([
+        apiGet("summary", { hours }),
+        apiGet("series", { hours }),
+        apiGet("sessions", { hours }),
+        apiGet("recent", { limit: 40 }),
+        apiGet("meta", {})
+      ]);
+      if (summary && summary.ok === false) throw new Error(summary.error || "读取失败");
+      renderCards(summary || {});
+      renderBars(series || {});
+      renderRate(series || {});
+      renderSessions(sessions || {});
+      renderRecent(recent || {});
+      const p = (meta && meta.prices) || {};
+      const off = p.offpeak || {}, pk = p.peak || {};
+      document.getElementById("meta").innerHTML =
+        `单价（元/百万 token）· 高峰 未命中${pk.input_miss}/命中${pk.input_hit}/输出${pk.output}` +
+        ` · 空闲 未命中${off.input_miss}/命中${off.input_hit}/输出${off.output}` +
+        ` · 规则 ${esc(meta.peak_rule || "-")}（已录入节假日 ${meta.holiday_count || 0} 天）` +
+        ` · 当前 <b class="${meta.now_peak ? "miss" : "hit"}">${esc(meta.now_period || "-")}</b>` +
+        `<br>数据库 ${esc(meta.db_path || "-")} · 花费按每条请求发生时刻的档位估算`;
+      refreshSec = Number(meta.refresh_seconds || 0);
+      document.getElementById("updated").textContent =
+        "更新于 " + new Date().toLocaleTimeString();
+    } catch (e) {
+      document.getElementById("meta").innerHTML =
+        '<span class="miss">读取失败：' + esc(e.message) + '</span>';
+    }
+    if (timer) clearTimeout(timer);
+    if (refreshSec > 0) timer = setTimeout(load, refreshSec * 1000);
+  }
+
+  document.querySelectorAll(".bar button").forEach(btn => {
+    btn.addEventListener("click", () => { hours = Number(btn.dataset.h); load(); });
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>
