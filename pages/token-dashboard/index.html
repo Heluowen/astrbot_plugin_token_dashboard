@@ -87,10 +87,19 @@
   let hours = 24;
   let timer = null;
   let refreshSec = 60;
+  let retryDelay = 1000;
 
   // ---- 接口调用：优先走 WebUI 注入的 bridge，独立打开时回退到 /api/plug ----
   async function apiGet(path, params) {
-    const bridge = window.AstrBotPluginView || window.AstrBotPluginPage;
+    let bridge = window.AstrBotPluginView || window.AstrBotPluginPage;
+    // AstrBot may inject the page bridge just after this script starts.
+    if (!bridge) {
+      const deadline = Date.now() + 2000;
+      while (!bridge && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+        bridge = window.AstrBotPluginView || window.AstrBotPluginPage;
+      }
+    }
     if (bridge && typeof bridge.apiGet === "function") {
       if (typeof bridge.ready === "function") { try { await bridge.ready(); } catch (e) {} }
       return await bridge.apiGet(path, params || {});
@@ -257,11 +266,14 @@
         ` · 当前 <b class="${meta.now_peak ? "miss" : "hit"}">${esc(meta.now_period || "-")}</b>` +
         `<br>数据库 ${esc(meta.db_path || "-")} · 花费按每条请求发生时刻的档位估算`;
       refreshSec = Number(meta.refresh_seconds || 0);
+      retryDelay = 1000;
       document.getElementById("updated").textContent =
         "更新于 " + new Date().toLocaleTimeString();
     } catch (e) {
       document.getElementById("meta").innerHTML =
         '<span class="miss">读取失败：' + esc(e.message) + '</span>';
+      refreshSec = retryDelay / 1000;
+      retryDelay = Math.min(retryDelay * 2, 30000);
     }
     if (timer) clearTimeout(timer);
     if (refreshSec > 0) timer = setTimeout(load, refreshSec * 1000);
