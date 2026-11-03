@@ -2,6 +2,7 @@ name: astrbot_plugin_token_dashboard
 display_name: Token 用量看板
 desc: 可视化模型 token 消耗：缓存命中率趋势、按会话/模型拆分、单次请求明细与成本估算。数据直接读取 AstrBot 的 provider_stats，只读不改。
 short_desc: token 消耗可视化
-version: 1.0.0
+version: 1.0.1
 author: heluowen
 repo: https://github.com/Heluowen/astrbot_plugin_token_dashboard
+update info: 修改了默认打开无数据的问题。
