@@ -58,7 +58,7 @@ https://github.com/Heluowen/astrbot_plugin_token_dashboard
 | `session_labels` | 空 | 会话 ID → 名称的映射（JSON） |
 | `refresh_seconds` | 60 | 看板自动刷新间隔，0 为不刷新 |
 
-上表单价是 DeepSeek 的参考价，请按自己实际账单核对后调整。
+上表单价是 DeepSeek-V4.1-FLASH 的参考价，请按自己实际账单核对后调整。
 
 ### 计费时段规则
 
